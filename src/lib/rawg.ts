@@ -334,6 +334,30 @@ async function rawgFetch(url: URL, signal?: AbortSignal): Promise<Response> {
  * locally after normalization because RAWG's list endpoint can't filter on
  * them directly.
  */
+/**
+ * Fetch a single game by its RAWG id. Used by the recommendations route to
+ * seed the DB on demand when a game wasn't pre-loaded via /releases.
+ */
+export async function fetchGameById(
+  rawgId: number,
+  signal?: AbortSignal,
+): Promise<RawgRelease | null> {
+  const apiKey = requireEnv('RAWG_API_KEY');
+  const url = new URL(`${RAWG_API_BASE}/games/${rawgId}`);
+  url.searchParams.set('key', apiKey);
+
+  let res: Response;
+  try {
+    res = await rawgFetch(url, signal);
+  } catch {
+    return null;
+  }
+
+  if (!res.ok) return null;
+  const game = (await res.json()) as RawRawgGameDetail & RawRawgGame;
+  return normalizeGame(game);
+}
+
 export async function fetchReleases(
   params: FetchReleasesParams,
 ): Promise<RawgReleasesPage> {

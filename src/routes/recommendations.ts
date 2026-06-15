@@ -24,10 +24,12 @@ import {
   getGamesByRawgIds,
   getFreshRecommendations,
   saveRecommendations,
+  upsertGame,
   type GameRow,
   type RecommendationUpsert,
 } from '../lib/db.js';
 import { scoreRecommendations, ClaudeApiError } from '../lib/claude.js';
+import { fetchGameById } from '../lib/rawg.js';
 
 const MAX_GAME_IDS = 50;
 const TTL_DAYS = 30;
@@ -74,19 +76,37 @@ recommendationsRoutes.post('/', async (c) => {
   // De-dupe while preserving the set of requested rawgIds.
   const requestedRawgIds = [...new Set(rawIds as number[])];
 
-  // Resolve to stored rows. Unknown rawgIds can't be scored (no metadata, and
-  // the recommendations FK needs a games_table row) — report them separately.
-  const games = getGamesByRawgIds(requestedRawgIds);
-  const gameByRawgId = new Map<number, GameRow>(games.map((g) => [g.rawgId, g]));
-  const unknownRawgIds = requestedRawgIds.filter((id) => !gameByRawgId.has(id));
+  // Resolve to stored rows, fetching any unknowns from RAWG on demand.
+  let games = getGamesByRawgIds(requestedRawgIds);
+  const foundIds = new Set(games.map((g) => g.rawgId));
+  const unknownRawgIds = requestedRawgIds.filter((id) => !foundIds.has(id));
+
+  if (unknownRawgIds.length > 0) {
+    const fetched = await Promise.all(
+      unknownRawgIds.map((id) => fetchGameById(id)),
+    );
+    for (const release of fetched) {
+      if (!release) continue;
+      try {
+        const row = upsertGame({
+          rawgId: release.rawgId,
+          name: release.name,
+          category: release.category,
+          releaseDate: release.releaseDate,
+          platforms: release.platforms,
+          metacriticScore: release.metacriticScore,
+          description: release.description,
+        });
+        games = [...games, row];
+      } catch {
+        // Non-fatal: skip games we couldn't store.
+      }
+    }
+  }
 
   if (games.length === 0) {
     return c.json(
-      {
-        recommendations: [],
-        unknownGameIds: unknownRawgIds,
-        warning: 'None of the supplied gameIds are stored. Fetch them via /releases first.',
-      },
+      { recommendations: [], warning: 'Could not retrieve game data for scoring.' },
       200,
     );
   }
