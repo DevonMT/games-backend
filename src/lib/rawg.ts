@@ -376,7 +376,7 @@ export async function fetchReleases(
 
   // If a platform name was given that we couldn't resolve to a RAWG id, fall
   // back to a local name-contains filter so the param still has an effect.
-  const releases =
+  const platformFiltered =
     params.platform && !platformId
       ? filtered.filter((r) =>
           r.platforms.some((p) =>
@@ -384,6 +384,17 @@ export async function fetchReleases(
           ),
         )
       : filtered;
+
+  // Always post-filter by category locally so the shown games definitively
+  // belong to the requested category — RAWG's server-side genre filter can
+  // return broad matches that our normalization classifies differently.
+  const requestedCats = params.categories ?? [];
+  const releases =
+    requestedCats.length > 0
+      ? platformFiltered.filter((r) =>
+          requestedCats.some((c) => r.categories.includes(c)),
+        )
+      : platformFiltered;
 
   return {
     releases,
