@@ -1,0 +1,171 @@
+/**
+ * Recommendations route (Claude-backed).
+ *
+ *   POST /recommendations
+ *     body: { gameIds: number[] }   // rawg_ids from the /releases response
+ *     -> { recommendations: [{ gameId, gameName, confidenceScore, reasoning, cachedAt }] }
+ *
+ * Flow:
+ *   1. Validate gameIds (non-empty, <= 50, all numbers).
+ *   2. Resolve rawgIds to stored games_table rows (recommendations key on the
+ *      internal id, and we need name/description for the prompt anyway). Unknown
+ *      rawgIds — games we've never stored via /releases — are reported back so
+ *      the caller knows to fetch them first.
+ *   3. Read fresh (non-expired) recommendations from SQLite — cache hits.
+ *   4. Score only the cache misses via claude.ts (one batched API call).
+ *   5. Persist the fresh scores with expiresAt = now + 30 days.
+ *   6. Return cached + fresh combined.
+ *
+ * Gated behind requireApiSecret (wired in app.ts).
+ */
+
+import { Hono } from 'hono';
+import {
+  getGamesByRawgIds,
+  getFreshRecommendations,
+  saveRecommendations,
+  type GameRow,
+  type RecommendationUpsert,
+} from '../lib/db.js';
+import { scoreRecommendations, ClaudeApiError } from '../lib/claude.js';
+
+const MAX_GAME_IDS = 50;
+const TTL_DAYS = 30;
+
+export const recommendationsRoutes = new Hono();
+
+/** A single recommendation in the response shape. */
+interface ResponseRec {
+  gameId: number; // rawgId — what the caller sent in
+  gameName: string;
+  confidenceScore: number;
+  reasoning: string;
+  cachedAt: string; // ISO timestamp the recommendation was generated
+}
+
+function expiryFromNow(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString();
+}
+
+recommendationsRoutes.post('/', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Request body must be valid JSON.' }, 400);
+  }
+
+  const rawIds = (body as { gameIds?: unknown })?.gameIds;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return c.json({ error: '`gameIds` must be a non-empty array.' }, 400);
+  }
+  if (rawIds.length > MAX_GAME_IDS) {
+    return c.json(
+      { error: `\`gameIds\` may contain at most ${MAX_GAME_IDS} ids.` },
+      400,
+    );
+  }
+  if (!rawIds.every((n) => typeof n === 'number' && Number.isInteger(n))) {
+    return c.json({ error: '`gameIds` must contain only integers.' }, 400);
+  }
+
+  // De-dupe while preserving the set of requested rawgIds.
+  const requestedRawgIds = [...new Set(rawIds as number[])];
+
+  // Resolve to stored rows. Unknown rawgIds can't be scored (no metadata, and
+  // the recommendations FK needs a games_table row) — report them separately.
+  const games = getGamesByRawgIds(requestedRawgIds);
+  const gameByRawgId = new Map<number, GameRow>(games.map((g) => [g.rawgId, g]));
+  const unknownRawgIds = requestedRawgIds.filter((id) => !gameByRawgId.has(id));
+
+  if (games.length === 0) {
+    return c.json(
+      {
+        recommendations: [],
+        unknownGameIds: unknownRawgIds,
+        warning: 'None of the supplied gameIds are stored. Fetch them via /releases first.',
+      },
+      200,
+    );
+  }
+
+  // Cache read: fresh recommendations keyed by internal game id.
+  const internalIds = games.map((g) => g.id);
+  const cached = getFreshRecommendations(internalIds);
+  const cachedByGameId = new Map(cached.map((r) => [r.gameId, r]));
+
+  // Cache misses: stored games without a fresh recommendation row.
+  const misses = games.filter((g) => !cachedByGameId.has(g.id));
+
+  const responses: ResponseRec[] = [];
+
+  // Emit cached hits.
+  for (const rec of cached) {
+    responses.push({
+      gameId: rec.rawgId,
+      gameName: rec.gameName,
+      confidenceScore: rec.confidenceScore,
+      reasoning: rec.reasoning,
+      cachedAt: rec.generatedAt,
+    });
+  }
+
+  // Score the misses in one batched Claude call, then persist + emit.
+  if (misses.length > 0) {
+    let fresh;
+    try {
+      fresh = await scoreRecommendations(misses);
+    } catch (err) {
+      if (err instanceof ClaudeApiError) {
+        // If we have at least some cached results, degrade gracefully rather
+        // than failing the whole request.
+        if (responses.length > 0) {
+          return c.json({
+            recommendations: responses,
+            unknownGameIds: unknownRawgIds,
+            warning: `Some games could not be scored: ${err.message}`,
+          });
+        }
+        return c.json({ error: err.message }, err.status as 400);
+      }
+      return c.json(
+        { error: `Unexpected error: ${(err as Error).message}` },
+        500,
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const expiresAt = expiryFromNow(TTL_DAYS);
+    const freshByRawgId = new Map(fresh.map((r) => [r.rawgId, r]));
+
+    const toPersist: RecommendationUpsert[] = [];
+    for (const game of misses) {
+      const scored = freshByRawgId.get(game.rawgId);
+      if (!scored) continue; // model omitted this candidate; skip rather than invent
+      toPersist.push({
+        gameId: game.id,
+        confidenceScore: scored.confidenceScore,
+        reasoning: scored.reasoning,
+        expiresAt,
+      });
+      responses.push({
+        gameId: game.rawgId,
+        gameName: game.name,
+        confidenceScore: scored.confidenceScore,
+        reasoning: scored.reasoning,
+        cachedAt: generatedAt,
+      });
+    }
+
+    saveRecommendations(toPersist);
+  }
+
+  return c.json({
+    recommendations: responses,
+    ...(unknownRawgIds.length ? { unknownGameIds: unknownRawgIds } : {}),
+  });
+});
+
+export default recommendationsRoutes;

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+.vercel
+.DS_Store
+
+# Local SQLite database (games_table) + WAL/SHM sidecars
+data/
+*.db
+*.db-wal
+*.db-shm
+
+.vercel
