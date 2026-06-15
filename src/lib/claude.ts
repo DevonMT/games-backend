@@ -26,7 +26,7 @@ import { cache } from './cache.js';
 import { fetchSteamLibrary, type SteamLibrary } from './steam.js';
 import type { GameRow } from './db.js';
 
-const MODEL = 'claude-haiku-4-5';
+const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 4096;
 const TOP_N_LIBRARY = 10;
 

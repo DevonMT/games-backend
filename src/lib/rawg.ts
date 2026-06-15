@@ -47,6 +47,8 @@ export interface RawgRelease {
   metacriticScore: number | null;
   description: string | null;
   imageUrl: string | null;
+  developer: string | null;
+  publisher: string | null;
 }
 
 export interface RawgReleasesPage {
@@ -81,6 +83,9 @@ interface RawRawgTag {
   name?: string;
   slug?: string;
 }
+interface RawRawgCompany {
+  name?: string;
+}
 interface RawRawgGame {
   id: number;
   name?: string;
@@ -91,6 +96,8 @@ interface RawRawgGame {
   platforms?: RawRawgPlatformEntry[];
   genres?: RawRawgGenre[];
   tags?: RawRawgTag[];
+  developers?: RawRawgCompany[];
+  publishers?: RawRawgCompany[];
   added?: number; // how many RAWG users added it — our AAA-vs-indie heuristic
 }
 interface RawRawgListResponse {
@@ -223,6 +230,8 @@ function normalizeGame(game: RawRawgGame): RawgRelease {
       (game as RawRawgGameDetail).description_raw?.trim() ||
       null,
     imageUrl: game.background_image ?? null,
+    developer: game.developers?.[0]?.name ?? null,
+    publisher: game.publishers?.[0]?.name ?? null,
   };
 }
 
