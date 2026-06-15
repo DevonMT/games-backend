@@ -32,6 +32,7 @@ export interface GameRow {
   platforms: string[]; // decoded from the platforms_json column
   metacriticScore: number | null;
   description: string | null;
+  avgPlaytimeHours: number | null;
   rawgId: number;
   createdAt: string;
   updatedAt: string;
@@ -47,6 +48,7 @@ export interface GameUpsert {
   platforms?: string[];
   metacriticScore?: number | null;
   description?: string | null;
+  avgPlaytimeHours?: number | null;
 }
 
 /** Raw column shape as it comes back from SQLite (platforms still JSON text). */
@@ -59,6 +61,7 @@ interface RawGameRow {
   platforms_json: string | null;
   metacritic_score: number | null;
   description: string | null;
+  avg_playtime_hours: number | null;
   rawg_id: number;
   created_at: string;
   updated_at: string;
@@ -128,6 +131,13 @@ function initSchema(database: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_recs_game ON recommendations(game_id);
   `);
+
+  // Migration: add avg_playtime_hours if this DB was created before the column existed.
+  try {
+    database.exec('ALTER TABLE games_table ADD COLUMN avg_playtime_hours REAL;');
+  } catch {
+    // Column already exists — ignore.
+  }
 }
 
 function decodeRow(raw: RawGameRow): GameRow {
@@ -150,6 +160,7 @@ function decodeRow(raw: RawGameRow): GameRow {
     platforms,
     metacriticScore: raw.metacritic_score,
     description: raw.description,
+    avgPlaytimeHours: raw.avg_playtime_hours,
     rawgId: raw.rawg_id,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
@@ -169,20 +180,21 @@ export function upsertGame(game: GameUpsert): GameRow {
   const stmt = database.prepare(`
     INSERT INTO games_table (
       steam_id, name, category, release_date, platforms_json,
-      metacritic_score, description, rawg_id, created_at, updated_at
+      metacritic_score, description, avg_playtime_hours, rawg_id, created_at, updated_at
     ) VALUES (
       @steamId, @name, @category, @releaseDate, @platformsJson,
-      @metacriticScore, @description, @rawgId, @now, @now
+      @metacriticScore, @description, @avgPlaytimeHours, @rawgId, @now, @now
     )
     ON CONFLICT(rawg_id) DO UPDATE SET
-      steam_id         = excluded.steam_id,
-      name             = excluded.name,
-      category         = excluded.category,
-      release_date     = excluded.release_date,
-      platforms_json   = excluded.platforms_json,
-      metacritic_score = excluded.metacritic_score,
-      description       = excluded.description,
-      updated_at        = excluded.updated_at
+      steam_id            = excluded.steam_id,
+      name                = excluded.name,
+      category            = excluded.category,
+      release_date        = excluded.release_date,
+      platforms_json      = excluded.platforms_json,
+      metacritic_score    = excluded.metacritic_score,
+      description         = excluded.description,
+      avg_playtime_hours  = excluded.avg_playtime_hours,
+      updated_at          = excluded.updated_at
     RETURNING *;
   `);
 
@@ -194,6 +206,7 @@ export function upsertGame(game: GameUpsert): GameRow {
     platformsJson,
     metacriticScore: game.metacriticScore ?? null,
     description: game.description ?? null,
+    avgPlaytimeHours: game.avgPlaytimeHours ?? null,
     rawgId: game.rawgId,
     now,
   }) as RawGameRow;

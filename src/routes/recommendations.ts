@@ -96,6 +96,7 @@ recommendationsRoutes.post('/', async (c) => {
           platforms: release.platforms,
           metacriticScore: release.metacriticScore,
           description: release.description,
+          avgPlaytimeHours: release.avgPlaytimeHours,
         });
         games = [...games, row];
       } catch {

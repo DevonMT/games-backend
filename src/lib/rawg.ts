@@ -50,6 +50,7 @@ export interface RawgRelease {
   developer: string | null;
   publisher: string | null;
   steamAppId: number | null;
+  avgPlaytimeHours: number | null;
 }
 
 export interface RawgReleasesPage {
@@ -104,6 +105,7 @@ interface RawRawgGame {
   developers?: RawRawgCompany[];
   publishers?: RawRawgCompany[];
   stores?: RawRawgStore[];
+  playtime?: number | null; // average playtime in hours reported by RAWG
   added?: number; // how many RAWG users added it — our AAA-vs-indie heuristic
 }
 interface RawRawgListResponse {
@@ -239,6 +241,7 @@ function normalizeGame(game: RawRawgGame): RawgRelease {
     developer: game.developers?.[0]?.name ?? null,
     publisher: game.publishers?.[0]?.name ?? null,
     steamAppId: extractSteamAppId(game),
+    avgPlaytimeHours: typeof game.playtime === 'number' && game.playtime > 0 ? game.playtime : null,
   };
 }
 
