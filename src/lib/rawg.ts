@@ -49,6 +49,7 @@ export interface RawgRelease {
   imageUrl: string | null;
   developer: string | null;
   publisher: string | null;
+  steamAppId: number | null;
 }
 
 export interface RawgReleasesPage {
@@ -86,6 +87,10 @@ interface RawRawgTag {
 interface RawRawgCompany {
   name?: string;
 }
+interface RawRawgStore {
+  url?: string;
+  store?: { slug?: string };
+}
 interface RawRawgGame {
   id: number;
   name?: string;
@@ -98,6 +103,7 @@ interface RawRawgGame {
   tags?: RawRawgTag[];
   developers?: RawRawgCompany[];
   publishers?: RawRawgCompany[];
+  stores?: RawRawgStore[];
   added?: number; // how many RAWG users added it — our AAA-vs-indie heuristic
 }
 interface RawRawgListResponse {
@@ -232,7 +238,17 @@ function normalizeGame(game: RawRawgGame): RawgRelease {
     imageUrl: game.background_image ?? null,
     developer: game.developers?.[0]?.name ?? null,
     publisher: game.publishers?.[0]?.name ?? null,
+    steamAppId: extractSteamAppId(game),
   };
+}
+
+const STEAM_APP_URL_RE = /store\.steampowered\.com\/app\/(\d+)/;
+
+function extractSteamAppId(game: RawRawgGame): number | null {
+  const steamStore = (game.stores ?? []).find((s) => s.store?.slug === 'steam');
+  if (!steamStore?.url) return null;
+  const m = steamStore.url.match(STEAM_APP_URL_RE);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 /**
