@@ -28,7 +28,13 @@ import {
   type GameRow,
   type RecommendationUpsert,
 } from '../lib/db.js';
-import { scoreRecommendations, ClaudeApiError, type UserPreferences } from '../lib/claude.js';
+import {
+  scoreRecommendations,
+  discoverRecommendations,
+  lookupGame,
+  ClaudeApiError,
+  type UserPreferences,
+} from '../lib/claude.js';
 import { fetchGameById } from '../lib/rawg.js';
 
 const MAX_GAME_IDS = 50;
@@ -190,6 +196,56 @@ recommendationsRoutes.post('/', async (c) => {
     recommendations: responses,
     ...(unknownRawgIds.length ? { unknownGameIds: unknownRawgIds } : {}),
   });
+});
+
+// ── POST /recommendations/discover ───────────────────────────────────────────
+
+recommendationsRoutes.post('/discover', async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { body = {}; }
+
+  const b = body as Record<string, unknown>;
+  const platforms = Array.isArray(b.platforms) ? (b.platforms as string[]) : [];
+  const genres    = Array.isArray(b.genres)    ? (b.genres    as string[]) : [];
+  const limit     = Math.max(1, Math.min(12, typeof b.limit === 'number' ? b.limit : 8));
+  const preferences = b.preferences && typeof b.preferences === 'object'
+    ? (b.preferences as UserPreferences)
+    : undefined;
+
+  try {
+    const picks = await discoverRecommendations({ platforms, genres, limit }, preferences);
+    return c.json({ picks });
+  } catch (err) {
+    if (err instanceof ClaudeApiError) return c.json({ error: err.message }, err.status as 400);
+    return c.json({ error: `Unexpected error: ${(err as Error).message}` }, 500);
+  }
+});
+
+// ── POST /recommendations/lookup ─────────────────────────────────────────────
+
+recommendationsRoutes.post('/lookup', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Request body must be valid JSON.' }, 400);
+  }
+
+  const b = body as Record<string, unknown>;
+  const query = typeof b.query === 'string' ? b.query.trim() : '';
+  if (!query) return c.json({ error: '`query` is required.' }, 400);
+
+  const preferences = b.preferences && typeof b.preferences === 'object'
+    ? (b.preferences as UserPreferences)
+    : undefined;
+
+  try {
+    const results = await lookupGame(query, preferences);
+    return c.json({ results });
+  } catch (err) {
+    if (err instanceof ClaudeApiError) return c.json({ error: err.message }, err.status as 400);
+    return c.json({ error: `Unexpected error: ${(err as Error).message}` }, 500);
+  }
 });
 
 export default recommendationsRoutes;

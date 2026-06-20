@@ -436,3 +436,208 @@ export async function scoreBacklog(
   }
   return picks.sort((a, b) => b.confidenceScore - a.confidenceScore);
 }
+
+// ── Discovery ─────────────────────────────────────────────────────────────────
+
+const PLATFORM_DISPLAY: Record<string, string> = {
+  'pc':              'PC (Steam / Epic / GOG)',
+  'playstation5':    'PlayStation 5',
+  'playstation4':    'PlayStation 4',
+  'xbox-series-x':   'Xbox Series X/S',
+  'nintendo-switch': 'Nintendo Switch',
+};
+
+export interface DiscoverPick {
+  name: string;
+  platforms: string[];
+  description: string;
+  confidenceScore: number;
+  reasoning: string;
+}
+
+const DISCOVER_TOOL: Anthropic.Tool = {
+  name: 'submit_discoveries',
+  description: 'Submit games the user should discover and acquire.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      picks: {
+        type: 'array',
+        description: 'Picks in descending order of confidence.',
+        items: {
+          type: 'object',
+          properties: {
+            name:            { type: 'string',  description: 'Exact game title.' },
+            platforms:       { type: 'array',   items: { type: 'string' }, description: 'Platforms this game is available on.' },
+            description:     { type: 'string',  description: '2-3 sentence overview of the game.' },
+            confidenceScore: { type: 'integer', description: '0-100 likelihood the user will enjoy it.' },
+            reasoning:       { type: 'string',  description: '1-2 sentences grounded in the taste profile.' },
+          },
+          required: ['name', 'platforms', 'description', 'confidenceScore', 'reasoning'],
+        },
+      },
+    },
+    required: ['picks'],
+  },
+};
+
+export async function discoverRecommendations(
+  opts: { platforms?: string[]; genres?: string[]; limit?: number },
+  prefs?: UserPreferences,
+): Promise<DiscoverPick[]> {
+  const limit = Math.max(1, Math.min(12, opts.limit ?? 8));
+  const library = await loadLibrary();
+  const taste = buildTasteProfile(library, prefs);
+
+  const platformNames = (opts.platforms ?? [])
+    .map((p) => PLATFORM_DISPLAY[p] ?? p)
+    .filter(Boolean);
+  const platformStr = platformNames.length
+    ? `Preferred platforms: ${platformNames.join(', ')}`
+    : 'Any platform (PC, PlayStation, Xbox, Switch, etc.)';
+
+  const genreStr = (opts.genres ?? []).length
+    ? `Genre preference: ${opts.genres!.join(', ')}`
+    : '';
+
+  const ownedNames = library.games.slice(0, 60).map((g) => g.name).join(', ');
+  const ownedBlock = ownedNames
+    ? `The user already owns these Steam games — do NOT recommend them:\n${ownedNames}`
+    : '';
+
+  const prompt = [
+    'You help a user discover games they should buy and play next.',
+    '',
+    taste,
+    '',
+    platformStr,
+    genreStr,
+    '',
+    ownedBlock,
+    '',
+    `Recommend exactly ${limit} games this user would love that they likely do not own yet.`,
+    'Draw from your full knowledge — any era, any release, not just recent titles.',
+    'For each game provide: its exact title, the platforms it is available on,',
+    'a 2-3 sentence description, a 0-100 confidence score for this specific user,',
+    'and 1-2 sentences of reasoning grounded in their taste profile.',
+    'Sort picks by confidence score descending. Call submit_discoveries exactly once.',
+  ].filter(Boolean).join('\n');
+
+  let message: Anthropic.Message;
+  try {
+    message = await getClient().messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      tools: [DISCOVER_TOOL],
+      tool_choice: { type: 'tool', name: DISCOVER_TOOL.name },
+      messages: [{ role: 'user', content: prompt }],
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    }
+    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+  }
+
+  const toolUse = message.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+  );
+  if (!toolUse) throw new ClaudeApiError('Claude did not return discoveries.', 502);
+
+  const result = toolUse.input as { picks: DiscoverPick[] };
+  if (!result || !Array.isArray(result.picks)) {
+    throw new ClaudeApiError('Claude returned a malformed discoveries payload.', 502);
+  }
+
+  return result.picks
+    .map((p) => ({ ...p, confidenceScore: clampScore(p.confidenceScore) }))
+    .sort((a, b) => b.confidenceScore - a.confidenceScore);
+}
+
+// ── Lookup ────────────────────────────────────────────────────────────────────
+
+export interface LookupResult {
+  name: string;
+  platforms: string[];
+  description: string;
+  confidenceScore: number;
+  reasoning: string;
+}
+
+const LOOKUP_TOOL: Anthropic.Tool = {
+  name: 'submit_lookup',
+  description: 'Submit scored game results for the lookup query.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      results: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name:            { type: 'string' },
+            platforms:       { type: 'array',   items: { type: 'string' } },
+            description:     { type: 'string',  description: '2-3 sentence game overview.' },
+            confidenceScore: { type: 'integer' },
+            reasoning:       { type: 'string',  description: '1-2 sentences grounded in the taste profile.' },
+          },
+          required: ['name', 'platforms', 'description', 'confidenceScore', 'reasoning'],
+        },
+      },
+    },
+    required: ['results'],
+  },
+};
+
+export async function lookupGame(
+  query: string,
+  prefs?: UserPreferences,
+): Promise<LookupResult[]> {
+  const library = await loadLibrary();
+  const taste = buildTasteProfile(library, prefs);
+
+  const prompt = [
+    'You help a user evaluate whether a game or type of game is right for them.',
+    '',
+    taste,
+    '',
+    `User query: "${query}"`,
+    '',
+    'If this is a specific game title: return exactly 1 result scoring that game for this user.',
+    'If this is a descriptive query ("games like X", "a game with Y mechanics"): return the',
+    '2-4 best matching games scored for this user.',
+    'For each: provide the exact title, platforms it is on, a 2-3 sentence description,',
+    'a 0-100 confidence score, and 1-2 sentences of reasoning grounded in their taste profile.',
+    'Call submit_lookup exactly once.',
+  ].join('\n');
+
+  let message: Anthropic.Message;
+  try {
+    message = await getClient().messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      tools: [LOOKUP_TOOL],
+      tool_choice: { type: 'tool', name: LOOKUP_TOOL.name },
+      messages: [{ role: 'user', content: prompt }],
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    }
+    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+  }
+
+  const toolUse = message.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+  );
+  if (!toolUse) throw new ClaudeApiError('Claude did not return lookup results.', 502);
+
+  const result = toolUse.input as { results: LookupResult[] };
+  if (!result || !Array.isArray(result.results)) {
+    throw new ClaudeApiError('Claude returned a malformed lookup payload.', 502);
+  }
+
+  return result.results
+    .map((r) => ({ ...r, confidenceScore: clampScore(r.confidenceScore) }))
+    .sort((a, b) => b.confidenceScore - a.confidenceScore);
+}
