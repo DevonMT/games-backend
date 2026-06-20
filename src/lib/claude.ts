@@ -43,6 +43,19 @@ export interface ClaudeRecommendation {
   reasoning: string;
 }
 
+/**
+ * Manual taste preferences from the user's on-page quiz. Supplements Steam
+ * playtime data with games from other platforms and self-reported values.
+ */
+export interface UserPreferences {
+  /** Comma-separated favorites not on Steam, or where playtime doesn't reflect love for them. */
+  favoritesNote?: string;
+  /** Slugs of what the user values most: story, build-depth, combat, exploration, lore, social, emotional, mechanics */
+  values?: string[];
+  /** Free-form additional context for Claude. */
+  notes?: string;
+}
+
 /** Carries an HTTP-ish status so the route can map failures sensibly. */
 export class ClaudeApiError extends Error {
   constructor(
@@ -81,21 +94,60 @@ async function loadLibrary(): Promise<SteamLibrary> {
   });
 }
 
-/** Render the top-N most-played games as a compact taste profile. */
-function summarizeTaste(library: SteamLibrary): string {
+const VALUE_LABELS: Record<string, string> = {
+  'story':       'story & narrative depth',
+  'build-depth': 'build depth & character systems',
+  'combat':      'combat feel & mechanics',
+  'exploration': 'world exploration',
+  'lore':        'lore & world-building',
+  'social':      'MMO / social content',
+  'emotional':   'emotional impact',
+  'mechanics':   'unique mechanics',
+};
+
+/**
+ * Assemble a full taste profile from Steam library data + optional manual prefs.
+ * Manual prefs are weighted equally with playtime — they capture games on other
+ * platforms and why the user likes specific titles, not just how many hours.
+ */
+function buildTasteProfile(library: SteamLibrary, prefs?: UserPreferences): string {
   const top = [...library.games]
     .sort((a, b) => b.hoursPlayed - a.hoursPlayed)
     .slice(0, TOP_N_LIBRARY)
     .filter((g) => g.hoursPlayed > 0);
 
-  if (top.length === 0) {
-    return 'The user has no recorded playtime, so infer taste conservatively.';
+  const parts: string[] = [];
+
+  if (top.length > 0) {
+    const lines = top.map((g, i) => `${i + 1}. ${g.name} — ${g.hoursPlayed}h`);
+    parts.push(`Most-played Steam games:\n${lines.join('\n')}`);
+  } else {
+    parts.push('No Steam playtime recorded.');
   }
 
-  const lines = top.map(
-    (g, i) => `${i + 1}. ${g.name} — ${g.hoursPlayed} hours`,
-  );
-  return `The user's most-played Steam games (by total hours):\n${lines.join('\n')}`;
+  if (prefs) {
+    const prefParts: string[] = [];
+    if (prefs.favoritesNote?.trim()) {
+      prefParts.push(
+        `Favorite games not reflected in Steam (other platforms, or where playtime understates enjoyment):\n${prefs.favoritesNote.trim()}`,
+      );
+    }
+    if (prefs.values?.length) {
+      const labels = prefs.values.map((v) => `• ${VALUE_LABELS[v] ?? v}`).join('\n');
+      prefParts.push(`What the user values most in games (self-reported):\n${labels}`);
+    }
+    if (prefs.notes?.trim()) {
+      prefParts.push(`Additional context:\n${prefs.notes.trim()}`);
+    }
+    if (prefParts.length > 0) {
+      parts.push(
+        'User-provided taste context (weight equally with playtime — this fills in gaps Steam cannot show):\n\n' +
+          prefParts.join('\n\n'),
+      );
+    }
+  }
+
+  return parts.join('\n\n');
 }
 
 /** Render the candidate list Claude must score. */
@@ -175,11 +227,12 @@ function clampScore(n: number): number {
  */
 export async function scoreRecommendations(
   candidates: GameRow[],
+  prefs?: UserPreferences,
 ): Promise<ClaudeRecommendation[]> {
   if (candidates.length === 0) return [];
 
   const library = await loadLibrary();
-  const taste = summarizeTaste(library);
+  const taste = buildTasteProfile(library, prefs);
   const candidateList = describeCandidates(candidates);
 
   const prompt = [
@@ -309,11 +362,12 @@ interface BacklogToolResult {
 export async function scoreBacklog(
   candidates: SteamGame[],
   topN: number = 5,
+  prefs?: UserPreferences,
 ): Promise<BacklogPick[]> {
   if (candidates.length === 0) return [];
 
   const library = await loadLibrary();
-  const taste = summarizeTaste(library);
+  const taste = buildTasteProfile(library, prefs);
 
   const candidateLines = candidates
     .map((g) => `- ${g.name} (appId: ${g.appId}, ${g.hoursPlayed}h played)`)

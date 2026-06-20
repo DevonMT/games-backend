@@ -12,7 +12,7 @@
 import { Hono } from 'hono';
 import { cache } from '../lib/cache.js';
 import { fetchSteamLibrary, SteamApiError, type SteamLibrary } from '../lib/steam.js';
-import { scoreBacklog, ClaudeApiError } from '../lib/claude.js';
+import { scoreBacklog, ClaudeApiError, type UserPreferences } from '../lib/claude.js';
 
 const CACHE_KEY = 'steam:library';
 const CACHE_TTL_SECONDS = 60 * 60; // 1 hour
@@ -80,13 +80,20 @@ steamRoutes.post('/library/refresh', async (c) => {
  *   threshold  Max hours played to be considered "unplayed" (default: 5)
  *   limit      How many picks to return (default: 5, max: 10)
  */
-steamRoutes.get('/backlog-picks', async (c) => {
+steamRoutes.post('/backlog-picks', async (c) => {
   const threshold = Math.max(0, parseFloat(c.req.query('threshold') ?? '5') || 5);
   const limit = Math.max(1, Math.min(10, parseInt(c.req.query('limit') ?? '5', 10) || 5));
   const excludeParam = c.req.query('exclude') ?? '';
   const excludedAppIds = new Set(
     excludeParam.split(',').map(Number).filter((n) => n > 0 && Number.isFinite(n)),
   );
+
+  let preferences: UserPreferences | undefined;
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const rawPrefs = (body as { preferences?: unknown })?.preferences;
+    if (rawPrefs && typeof rawPrefs === 'object') preferences = rawPrefs as UserPreferences;
+  } catch { /* no body — fine */ }
 
   let library: SteamLibrary;
   try {
@@ -114,7 +121,7 @@ steamRoutes.get('/backlog-picks', async (c) => {
   const capped = candidates.length > 120 ? candidates.slice(0, 120) : candidates;
 
   try {
-    const picks = await scoreBacklog(capped, limit);
+    const picks = await scoreBacklog(capped, limit, preferences);
     return c.json({ picks, candidateCount: candidates.length, threshold });
   } catch (err) {
     if (err instanceof ClaudeApiError) {

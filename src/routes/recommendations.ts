@@ -28,7 +28,7 @@ import {
   type GameRow,
   type RecommendationUpsert,
 } from '../lib/db.js';
-import { scoreRecommendations, ClaudeApiError } from '../lib/claude.js';
+import { scoreRecommendations, ClaudeApiError, type UserPreferences } from '../lib/claude.js';
 import { fetchGameById } from '../lib/rawg.js';
 
 const MAX_GAME_IDS = 50;
@@ -59,7 +59,10 @@ recommendationsRoutes.post('/', async (c) => {
     return c.json({ error: 'Request body must be valid JSON.' }, 400);
   }
 
-  const rawIds = (body as { gameIds?: unknown })?.gameIds;
+  const rawIds = (body as { gameIds?: unknown; preferences?: unknown })?.gameIds;
+  const rawPrefs = (body as { preferences?: unknown })?.preferences;
+  const preferences: UserPreferences | undefined =
+    rawPrefs && typeof rawPrefs === 'object' ? (rawPrefs as UserPreferences) : undefined;
   if (!Array.isArray(rawIds) || rawIds.length === 0) {
     return c.json({ error: '`gameIds` must be a non-empty array.' }, 400);
   }
@@ -137,7 +140,7 @@ recommendationsRoutes.post('/', async (c) => {
   if (misses.length > 0) {
     let fresh;
     try {
-      fresh = await scoreRecommendations(misses);
+      fresh = await scoreRecommendations(misses, preferences);
     } catch (err) {
       if (err instanceof ClaudeApiError) {
         // If we have at least some cached results, degrade gracefully rather
