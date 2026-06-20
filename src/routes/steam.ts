@@ -92,7 +92,13 @@ steamRoutes.get('/backlog-picks', async (c) => {
     return c.json(body, status as 400);
   }
 
-  const candidates = library.games.filter((g) => g.hoursPlayed < threshold);
+  // Sort ascending so least-played (most "unstarted") games come first.
+  // The Steam library arrives sorted descending by hoursPlayed, so without
+  // this re-sort the cap would chop off the 0h games when the pool is large.
+  const candidates = library.games
+    .filter((g) => g.hoursPlayed < threshold)
+    .sort((a, b) => a.hoursPlayed - b.hoursPlayed);
+
   if (candidates.length === 0) {
     return c.json({
       picks: [],
