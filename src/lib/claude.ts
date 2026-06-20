@@ -26,7 +26,7 @@ import { cache } from './cache.js';
 import { fetchSteamLibrary, type SteamGame, type SteamLibrary } from './steam.js';
 import type { GameRow } from './db.js';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 4096;
 const TOP_N_LIBRARY = 10;
 
@@ -103,6 +103,7 @@ const VALUE_LABELS: Record<string, string> = {
   'social':      'MMO / social content',
   'emotional':   'emotional impact',
   'mechanics':   'unique mechanics',
+  'fantasy':     'fantasy setting (strong preference — penalize games set in realistic/modern/sci-fi worlds unless story/systems are exceptional)',
 };
 
 /**
