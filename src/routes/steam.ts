@@ -83,6 +83,10 @@ steamRoutes.post('/library/refresh', async (c) => {
 steamRoutes.get('/backlog-picks', async (c) => {
   const threshold = Math.max(0, parseFloat(c.req.query('threshold') ?? '5') || 5);
   const limit = Math.max(1, Math.min(10, parseInt(c.req.query('limit') ?? '5', 10) || 5));
+  const excludeParam = c.req.query('exclude') ?? '';
+  const excludedAppIds = new Set(
+    excludeParam.split(',').map(Number).filter((n) => n > 0 && Number.isFinite(n)),
+  );
 
   let library: SteamLibrary;
   try {
@@ -96,7 +100,7 @@ steamRoutes.get('/backlog-picks', async (c) => {
   // The Steam library arrives sorted descending by hoursPlayed, so without
   // this re-sort the cap would chop off the 0h games when the pool is large.
   const candidates = library.games
-    .filter((g) => g.hoursPlayed < threshold)
+    .filter((g) => g.hoursPlayed < threshold && !excludedAppIds.has(g.appId))
     .sort((a, b) => a.hoursPlayed - b.hoursPlayed);
 
   if (candidates.length === 0) {

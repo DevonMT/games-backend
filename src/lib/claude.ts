@@ -379,5 +379,5 @@ export async function scoreBacklog(
       reasoning: typeof p.reasoning === 'string' ? p.reasoning.trim() : '',
     });
   }
-  return picks;
+  return picks.sort((a, b) => b.confidenceScore - a.confidenceScore);
 }
