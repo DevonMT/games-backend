@@ -23,7 +23,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { requireEnv } from './env.js';
 import { cache } from './cache.js';
-import { fetchSteamLibrary, type SteamLibrary } from './steam.js';
+import { fetchSteamLibrary, type SteamGame, type SteamLibrary } from './steam.js';
 import type { GameRow } from './db.js';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -259,4 +259,125 @@ export async function scoreRecommendations(
   }
 
   return [...byRawgId.values()];
+}
+
+// ── Backlog scoring ───────────────────────────────────────────────────────────
+
+/** One pick from the user's unplayed Steam library. */
+export interface BacklogPick {
+  appId: number;
+  name: string;
+  hoursPlayed: number;
+  confidenceScore: number;
+  reasoning: string;
+}
+
+const BACKLOG_TOOL: Anthropic.Tool = {
+  name: 'submit_backlog_picks',
+  description: 'Submit the top picks from the user\'s owned-but-unplayed Steam library.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      picks: {
+        type: 'array',
+        description: 'Top picks in descending order of confidence.',
+        items: {
+          type: 'object',
+          properties: {
+            appId:           { type: 'integer', description: 'Steam AppID of the game.' },
+            name:            { type: 'string',  description: 'Exact game name as provided.' },
+            confidenceScore: { type: 'integer', description: '0-100 likelihood the user will enjoy it.' },
+            reasoning:       { type: 'string',  description: 'One to two sentences grounded in the taste profile.' },
+          },
+          required: ['appId', 'name', 'confidenceScore', 'reasoning'],
+        },
+      },
+    },
+    required: ['picks'],
+  },
+};
+
+interface BacklogToolResult {
+  picks: Array<{ appId: number; name: string; confidenceScore: number; reasoning: string }>;
+}
+
+/**
+ * Given the user's unplayed Steam games, ask Claude to rank the top N they'd
+ * most enjoy based on their taste profile. Uses Claude's own knowledge of each
+ * game — no RAWG enrichment needed.
+ */
+export async function scoreBacklog(
+  candidates: SteamGame[],
+  topN: number = 5,
+): Promise<BacklogPick[]> {
+  if (candidates.length === 0) return [];
+
+  const library = await loadLibrary();
+  const taste = summarizeTaste(library);
+
+  const candidateLines = candidates
+    .map((g) => `- ${g.name} (appId: ${g.appId}, ${g.hoursPlayed}h played)`)
+    .join('\n');
+
+  const prompt = [
+    'You help a single user decide which games from their Steam backlog to play next.',
+    '',
+    taste,
+    '',
+    `The user owns the following games but has played each for fewer than a few hours.`,
+    `Use your knowledge of each game's genre, tone, and gameplay to match against their`,
+    `taste profile. Pick the top ${topN} they are most likely to enjoy.`,
+    '',
+    'Score 0-100 for how much they will enjoy it (not how good the game is in general).',
+    'Give one to two sentences of reasoning grounded in their taste profile.',
+    `Return exactly ${topN} picks (or fewer only if fewer than ${topN} candidates are listed).`,
+    '',
+    'Candidates:',
+    candidateLines,
+  ].join('\n');
+
+  let message: Anthropic.Message;
+  try {
+    message = await getClient().messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      tools: [BACKLOG_TOOL],
+      tool_choice: { type: 'tool', name: BACKLOG_TOOL.name },
+      messages: [{ role: 'user', content: prompt }],
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    }
+    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+  }
+
+  const toolUse = message.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+  );
+  if (!toolUse) {
+    throw new ClaudeApiError('Claude did not return backlog picks.', 502);
+  }
+
+  const result = toolUse.input as BacklogToolResult;
+  if (!result || !Array.isArray(result.picks)) {
+    throw new ClaudeApiError('Claude returned a malformed backlog payload.', 502);
+  }
+
+  const validAppIds = new Map(candidates.map((g) => [g.appId, g]));
+  const seen = new Set<number>();
+  const picks: BacklogPick[] = [];
+  for (const p of result.picks) {
+    const candidate = validAppIds.get(p.appId);
+    if (seen.has(p.appId) || !candidate) continue;
+    seen.add(p.appId);
+    picks.push({
+      appId: p.appId,
+      name: p.name,
+      hoursPlayed: candidate.hoursPlayed,
+      confidenceScore: clampScore(p.confidenceScore),
+      reasoning: typeof p.reasoning === 'string' ? p.reasoning.trim() : '',
+    });
+  }
+  return picks;
 }

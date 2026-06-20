@@ -12,6 +12,7 @@
 import { Hono } from 'hono';
 import { cache } from '../lib/cache.js';
 import { fetchSteamLibrary, SteamApiError, type SteamLibrary } from '../lib/steam.js';
+import { scoreBacklog, ClaudeApiError } from '../lib/claude.js';
 
 const CACHE_KEY = 'steam:library';
 const CACHE_TTL_SECONDS = 60 * 60; // 1 hour
@@ -66,6 +67,50 @@ steamRoutes.post('/library/refresh', async (c) => {
   } catch (err) {
     const { status, body } = handleError(err);
     return c.json(body, status as 400);
+  }
+});
+
+/**
+ * GET /steam/backlog-picks
+ *
+ * Looks at the user's Steam library, filters to games they've barely touched,
+ * and asks Claude to rank the ones they're most likely to enjoy.
+ *
+ * Query params:
+ *   threshold  Max hours played to be considered "unplayed" (default: 5)
+ *   limit      How many picks to return (default: 5, max: 10)
+ */
+steamRoutes.get('/backlog-picks', async (c) => {
+  const threshold = Math.max(0, parseFloat(c.req.query('threshold') ?? '5') || 5);
+  const limit = Math.max(1, Math.min(10, parseInt(c.req.query('limit') ?? '5', 10) || 5));
+
+  let library: SteamLibrary;
+  try {
+    library = await cache.getOrLoad(CACHE_KEY, CACHE_TTL_SECONDS, loadLibrary);
+  } catch (err) {
+    const { status, body } = handleError(err);
+    return c.json(body, status as 400);
+  }
+
+  const candidates = library.games.filter((g) => g.hoursPlayed < threshold);
+  if (candidates.length === 0) {
+    return c.json({
+      picks: [],
+      warning: `No games found with fewer than ${threshold} hours played.`,
+    });
+  }
+
+  // Cap candidate list so the prompt stays reasonable.
+  const capped = candidates.length > 120 ? candidates.slice(0, 120) : candidates;
+
+  try {
+    const picks = await scoreBacklog(capped, limit);
+    return c.json({ picks, candidateCount: candidates.length, threshold });
+  } catch (err) {
+    if (err instanceof ClaudeApiError) {
+      return c.json({ error: err.message }, err.status as 400);
+    }
+    return c.json({ error: `Unexpected error: ${(err as Error).message}` }, 500);
   }
 });
 
