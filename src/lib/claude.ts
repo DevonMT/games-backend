@@ -492,9 +492,9 @@ export async function discoverRecommendations(
   const platformNames = (opts.platforms ?? [])
     .map((p) => PLATFORM_DISPLAY[p] ?? p)
     .filter(Boolean);
-  const platformStr = platformNames.length
-    ? `Preferred platforms: ${platformNames.join(', ')}`
-    : 'Any platform (PC, PlayStation, Xbox, Switch, etc.)';
+  const platformFilter = platformNames.length
+    ? `PLATFORM FILTER (hard constraint): Only recommend games available on ${platformNames.join(' or ')}. Do NOT recommend games that are exclusive to other platforms. If a game has a PC port, it qualifies. If it is console-exclusive to a platform not listed, skip it.`
+    : '';
 
   const genreStr = (opts.genres ?? []).length
     ? `Genre preference: ${opts.genres!.join(', ')}`
@@ -510,7 +510,7 @@ export async function discoverRecommendations(
     '',
     taste,
     '',
-    platformStr,
+    platformFilter,
     genreStr,
     '',
     ownedBlock,
