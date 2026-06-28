@@ -138,6 +138,34 @@ function initSchema(database: Database.Database): void {
   } catch {
     // Column already exists — ignore.
   }
+
+  // Single-row preferences store (one user, no key needed).
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      rowid     INTEGER PRIMARY KEY,
+      prefs_json TEXT    NOT NULL DEFAULT '{}'
+    );
+    INSERT OR IGNORE INTO user_preferences (rowid, prefs_json) VALUES (1, '{}');
+  `);
+}
+
+export function getPreferences(): Record<string, unknown> {
+  const database = getDb();
+  const row = database
+    .prepare('SELECT prefs_json FROM user_preferences WHERE rowid = 1;')
+    .get() as { prefs_json: string } | undefined;
+  try {
+    return row ? JSON.parse(row.prefs_json) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setPreferences(prefs: Record<string, unknown>): void {
+  const database = getDb();
+  database
+    .prepare('INSERT OR REPLACE INTO user_preferences (rowid, prefs_json) VALUES (1, ?);')
+    .run(JSON.stringify(prefs));
 }
 
 function decodeRow(raw: RawGameRow): GameRow {

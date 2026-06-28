@@ -21,6 +21,7 @@ import { requireApiSecret } from './middleware/auth.js';
 import { steamRoutes } from './routes/steam.js';
 import { releasesRoutes } from './routes/releases.js';
 import { recommendationsRoutes } from './routes/recommendations.js';
+import { preferencesRoutes } from './routes/preferences.js';
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -54,6 +55,10 @@ export function createApp(): Hono {
   app.use('/recommendations', requireApiSecret);
   app.use('/recommendations/*', requireApiSecret);
   app.route('/recommendations', recommendationsRoutes);
+
+  app.use('/preferences', requireApiSecret);
+  app.use('/preferences/*', requireApiSecret);
+  app.route('/preferences', preferencesRoutes);
 
   app.notFound((c) => c.json({ error: 'Not found.' }, 404));
   app.onError((err, c) => {
