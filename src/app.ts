@@ -22,6 +22,7 @@ import { steamRoutes } from './routes/steam.js';
 import { releasesRoutes } from './routes/releases.js';
 import { recommendationsRoutes } from './routes/recommendations.js';
 import { preferencesRoutes } from './routes/preferences.js';
+import { learnRoutes } from './routes/learn.js';
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -34,7 +35,7 @@ export function createApp(): Hono {
     cors({
       origin: (origin) => (origins.includes(origin) ? origin : origins[0] ?? ''),
       allowHeaders: ['Content-Type', 'x-api-secret'],
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       maxAge: 86_400,
     }),
   );
@@ -59,6 +60,9 @@ export function createApp(): Hono {
   app.use('/preferences', requireApiSecret);
   app.use('/preferences/*', requireApiSecret);
   app.route('/preferences', preferencesRoutes);
+
+  app.use('/learn/*', requireApiSecret);
+  app.route('/learn', learnRoutes);
 
   app.notFound((c) => c.json({ error: 'Not found.' }, 404));
   app.onError((err, c) => {
