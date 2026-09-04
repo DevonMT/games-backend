@@ -13,6 +13,7 @@
 import type { Context, Next } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
 import { optionalEnv } from '../lib/env.js';
+import { accessConfigured, accessEmail } from './access.js';
 
 const HEADER = 'x-api-secret';
 
@@ -28,14 +29,33 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+/**
+ * Accepts EITHER a verified Cloudflare Access identity OR the shared secret.
+ *
+ * Access is the preferred door: when the front end is served from this same
+ * origin the cookie rides along automatically, so there is no key for anyone to
+ * paste or leak. The shared secret is kept so the old key-gated pages on
+ * devontroedel.com keep working during migration, and for machine callers.
+ * Drop SHARED_API_SECRET once nothing depends on it.
+ */
 export async function requireApiSecret(c: Context, next: Next): Promise<Response | void> {
+  const email = await accessEmail(c);
+  if (email) {
+    c.set('userEmail', email);
+    await next();
+    return;
+  }
+
   const expected = optionalEnv('SHARED_API_SECRET');
 
-  // Fail closed: if the server has no secret configured, reject everything
-  // rather than silently running an open API.
+  // Fail closed: with neither door configured, reject everything rather than
+  // silently running an open API.
   if (!expected) {
+    if (accessConfigured()) {
+      return c.json({ error: 'Sign in to use this.' }, 401);
+    }
     return c.json(
-      { error: 'Server misconfigured: SHARED_API_SECRET is not set.' },
+      { error: 'Server misconfigured: no ACCESS_AUD and no SHARED_API_SECRET.' },
       503,
     );
   }
