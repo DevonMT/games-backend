@@ -30,7 +30,28 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Accepts EITHER a verified Cloudflare Access identity OR the shared secret.
+ * Identity injected by the platform gateway.
+ *
+ * Two headers, and both are needed. X-Platform-User carries the email; the
+ * gateway sets it unconditionally so a client cannot smuggle its own value
+ * through. But this service sits on a Docker network with other containers,
+ * and any of them could call it directly with a header of their choosing --
+ * so X-Gateway-Token is a shared secret proving the request actually came
+ * through the gateway. Without it, trusting the identity header would mean
+ * trusting every container on the network to be honest about who it is.
+ */
+function platformEmail(c: Context): string | null {
+  const expected = optionalEnv('GATEWAY_TOKEN');
+  if (!expected) return null;
+  const provided = c.req.header('x-gateway-token');
+  if (!provided || !safeEqual(provided, expected)) return null;
+  const email = c.req.header('x-platform-user')?.trim();
+  return email ? email : null;
+}
+
+/**
+ * Accepts a platform-gateway identity, a verified Cloudflare Access identity,
+ * or the shared secret.
  *
  * Access is the preferred door: when the front end is served from this same
  * origin the cookie rides along automatically, so there is no key for anyone to
@@ -39,6 +60,15 @@ function safeEqual(a: string, b: string): boolean {
  * Drop SHARED_API_SECRET once nothing depends on it.
  */
 export async function requireApiSecret(c: Context, next: Next): Promise<Response | void> {
+  // The gateway is checked first because it is the door this service is meant
+  // to be behind now; Access remains only until its application is removed.
+  const viaGateway = platformEmail(c);
+  if (viaGateway) {
+    c.set('userEmail', viaGateway);
+    await next();
+    return;
+  }
+
   const email = await accessEmail(c);
   if (email) {
     c.set('userEmail', email);
@@ -48,14 +78,14 @@ export async function requireApiSecret(c: Context, next: Next): Promise<Response
 
   const expected = optionalEnv('SHARED_API_SECRET');
 
-  // Fail closed: with neither door configured, reject everything rather than
+  // Fail closed: with no door configured, reject everything rather than
   // silently running an open API.
   if (!expected) {
-    if (accessConfigured()) {
+    if (accessConfigured() || optionalEnv('GATEWAY_TOKEN')) {
       return c.json({ error: 'Sign in to use this.' }, 401);
     }
     return c.json(
-      { error: 'Server misconfigured: no ACCESS_AUD and no SHARED_API_SECRET.' },
+      { error: 'Server misconfigured: no GATEWAY_TOKEN, no ACCESS_AUD and no SHARED_API_SECRET.' },
       503,
     );
   }
