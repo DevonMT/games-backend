@@ -1,0 +1,31 @@
+name: games-backend
+
+services:
+  games-backend:
+    mem_limit: 512m
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    build: .
+    container_name: games-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      STATIC_DIR: /app/public
+    volumes:
+      - games_data:/app/data
+      # built /games + /learn pages, served SAME-ORIGIN so the Access cookie
+      # covers the API calls they make (a cross-origin page cannot use Access)
+      - /home/devon/apps/games-frontend:/app/public:ro
+    networks:
+      - dataplatform_default  # share the data-platform network to reach `postgres`
+    depends_on: []
+
+networks:
+  dataplatform_default:
+    external: true
+
+volumes:
+  games_data:
