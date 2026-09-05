@@ -16,7 +16,7 @@
  *   - On a RAWG outage, falls back to whatever the DB already holds for the
  *     filters rather than failing the dashboard outright.
  *
- * Gated behind requireApiSecret (wired in app.ts).
+ * Gated behind requireIdentity (wired in app.ts).
  */
 
 import { Hono } from 'hono';

@@ -17,7 +17,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { allowedOrigins } from './lib/env.js';
-import { requireApiSecret } from './middleware/auth.js';
+import { requireIdentity } from './middleware/auth.js';
 import { steamRoutes } from './routes/steam.js';
 import { releasesRoutes } from './routes/releases.js';
 import { recommendationsRoutes } from './routes/recommendations.js';
@@ -34,7 +34,7 @@ export function createApp(): Hono {
     '*',
     cors({
       origin: (origin) => (origins.includes(origin) ? origin : origins[0] ?? ''),
-      allowHeaders: ['Content-Type', 'x-api-secret'],
+      allowHeaders: ['Content-Type'],
       allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       maxAge: 86_400,
     }),
@@ -46,22 +46,22 @@ export function createApp(): Hono {
   );
 
   // Everything below the health check requires the shared secret.
-  app.use('/steam/*', requireApiSecret);
+  app.use('/steam/*', requireIdentity);
   app.route('/steam', steamRoutes);
 
-  app.use('/releases', requireApiSecret);
-  app.use('/releases/*', requireApiSecret);
+  app.use('/releases', requireIdentity);
+  app.use('/releases/*', requireIdentity);
   app.route('/releases', releasesRoutes);
 
-  app.use('/recommendations', requireApiSecret);
-  app.use('/recommendations/*', requireApiSecret);
+  app.use('/recommendations', requireIdentity);
+  app.use('/recommendations/*', requireIdentity);
   app.route('/recommendations', recommendationsRoutes);
 
-  app.use('/preferences', requireApiSecret);
-  app.use('/preferences/*', requireApiSecret);
+  app.use('/preferences', requireIdentity);
+  app.use('/preferences/*', requireIdentity);
   app.route('/preferences', preferencesRoutes);
 
-  app.use('/learn/*', requireApiSecret);
+  app.use('/learn/*', requireIdentity);
   app.route('/learn', learnRoutes);
 
   app.notFound((c) => c.json({ error: 'Not found.' }, 404));

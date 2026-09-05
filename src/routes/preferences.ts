@@ -4,7 +4,7 @@
  *   GET  /preferences   -> return stored taste profile
  *   POST /preferences   -> save taste profile (body: { favoritesNote, values, notes })
  *
- * Gated behind requireApiSecret (wired in app.ts).
+ * Gated behind requireIdentity (wired in app.ts).
  * Stored as a single row in user_preferences so prefs survive across devices.
  */
 

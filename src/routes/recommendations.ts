@@ -16,7 +16,7 @@
  *   5. Persist the fresh scores with expiresAt = now + 30 days.
  *   6. Return cached + fresh combined.
  *
- * Gated behind requireApiSecret (wired in app.ts).
+ * Gated behind requireIdentity (wired in app.ts).
  */
 
 import { Hono } from 'hono';

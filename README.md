@@ -15,7 +15,7 @@ to Vercel (or any Node host like Railway).
 
 ## Endpoints (Task 1)
 
-All `/steam/*` routes require the header `x-api-secret: <SHARED_API_SECRET>`.
+All `/steam/*` routes require a signed-in identity, supplied by the platform gateway.
 `GET /health` is public.
 
 ### `GET /steam/library`
@@ -56,7 +56,7 @@ behind a "Sync now" button.
 
 ### `GET /releases`
 Recent and upcoming releases from the [RAWG](https://rawg.io) catalog, filtered
-by category, date range, and platform. Requires `x-api-secret`.
+by category, date range, and platform. Requires a signed-in identity.
 
 Query params (all optional):
 
@@ -119,7 +119,6 @@ npm run dev            # tsx watch, serves http://localhost:8787
 | --- | --------------- |
 | `STEAM_API_KEY` | https://steamcommunity.com/dev/apikey |
 | `STEAM_USER_ID` | 64-bit SteamID — resolve at https://steamid.io/ |
-| `SHARED_API_SECRET` | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `ALLOWED_ORIGINS` | comma-separated CORS origins (defaults to localhost dev) |
 
 > **Important:** the Steam account's *Game details* privacy must be **Public**
@@ -147,11 +146,8 @@ npm run dev            # tsx watch, serves http://localhost:8787
 curl http://localhost:8787/health
 
 # Library (auth required)
-curl -H "x-api-secret: $SHARED_API_SECRET" http://localhost:8787/steam/library
 
 # Releases (auth required)
-curl -H "x-api-secret: $SHARED_API_SECRET" \
-  "http://localhost:8787/releases?categories=indie,AAA&since=2025-01-01&until=2025-12-31&platforms=Steam"
 ```
 
 ## Deploy
