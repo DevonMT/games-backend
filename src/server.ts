@@ -28,9 +28,10 @@ if (staticDir) {
 serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {
   console.log(`games-backend listening on http://localhost:${info.port}`);
   console.log(`  health:        GET  /health`);
-  console.log(`  steam library: GET  /steam/library        (x-api-secret)`);
-  console.log(`  force refresh: POST /steam/library/refresh (x-api-secret)`);
-  console.log(`  sync status:   GET  /steam/sync-status     (x-api-secret)`);
+  const door = accessConfigured() ? 'Access' : 'x-api-secret';
+  console.log(`  steam library: GET  /steam/library        (${door})`);
+  console.log(`  force refresh: POST /steam/library/refresh (${door})`);
+  console.log(`  sync status:   GET  /steam/sync-status     (${door})`);
   console.log(`  auth:          ${accessConfigured() ? 'Cloudflare Access' : 'shared secret only'}`);
   console.log(`  static:        ${staticDir ?? 'disabled (API only)'}`);
 });

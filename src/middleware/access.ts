@@ -58,7 +58,14 @@ export async function accessEmail(c: Context): Promise<string | null> {
       issuer: `https://${teamDomain}`,
       audience: aud,
     });
-    return (payload.email as string | undefined) ?? 'unknown';
+    // Human logins carry `email`. Service tokens carry `common_name` instead
+    // and no email at all — return that so audit logs name the caller rather
+    // than saying 'unknown'.
+    return (
+      (payload.email as string | undefined) ??
+      (payload.common_name as string | undefined) ??
+      'unknown'
+    );
   } catch {
     return null;
   }
