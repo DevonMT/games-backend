@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.1",
     "@hono/node-server": "^1.13.7",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.1",

@@ -20,8 +20,7 @@
  *     directly instead of free text we'd have to parse out of prose.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-import { requireEnv } from './env.js';
+import { askStructured, BrokerError, type ToolDef } from './broker.js';
 import { cache } from './cache.js';
 import { fetchSteamLibrary, type SteamGame, type SteamLibrary } from './steam.js';
 import type { GameRow } from './db.js';
@@ -65,16 +64,6 @@ export class ClaudeApiError extends Error {
     super(message);
     this.name = 'ClaudeApiError';
   }
-}
-
-let client: Anthropic | null = null;
-
-/** Lazily construct the SDK client so a missing key never crashes on import. */
-function getClient(): Anthropic {
-  if (client) return client;
-  const apiKey = requireEnv('CLAUDE_API_KEY');
-  client = new Anthropic({ apiKey });
-  return client;
 }
 
 /**
@@ -170,7 +159,7 @@ function describeCandidates(candidates: GameRow[]): string {
 }
 
 /** The single structured-output tool Claude must call exactly once. */
-const SCORE_TOOL: Anthropic.Tool = {
+const SCORE_TOOL: ToolDef = {
   name: 'submit_recommendations',
   description:
     'Submit a confidence score and short reasoning for every candidate game.',
@@ -262,39 +251,19 @@ export async function scoreRecommendations(
     candidateList,
   ].join('\n');
 
-  let message: Anthropic.Message;
+  let result: ToolResult;
   try {
-    message = await getClient().messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      tools: [SCORE_TOOL],
-      tool_choice: { type: 'tool', name: SCORE_TOOL.name },
-      messages: [{ role: 'user', content: prompt }],
-    });
+    result = await askStructured<ToolResult>(prompt, SCORE_TOOL.input_schema, MAX_TOKENS);
   } catch (err) {
-    if (err instanceof Anthropic.APIError) {
-      throw new ClaudeApiError(
-        `Claude API error: ${err.message}`,
-        err.status ?? 502,
-      );
+    // Keep ClaudeApiError as this service's error type: the routes and their
+    // tests are built on it, and where the call was refused is the broker's
+    // business, not theirs. The reason still travels in the message.
+    if (err instanceof BrokerError) {
+      throw new ClaudeApiError(err.message, err.status);
     }
-    throw new ClaudeApiError(
-      `Unexpected Claude error: ${(err as Error).message}`,
-      502,
-    );
+    throw new ClaudeApiError(`Unexpected error asking Claude: ${(err as Error).message}`, 502);
   }
 
-  const toolUse = message.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-  );
-  if (!toolUse) {
-    throw new ClaudeApiError(
-      'Claude did not return structured recommendations.',
-      502,
-    );
-  }
-
-  const result = toolUse.input as ToolResult;
   if (!result || !Array.isArray(result.recommendations)) {
     throw new ClaudeApiError('Claude returned a malformed recommendations payload.', 502);
   }
@@ -326,7 +295,7 @@ export interface BacklogPick {
   reasoning: string;
 }
 
-const BACKLOG_TOOL: Anthropic.Tool = {
+const BACKLOG_TOOL: ToolDef = {
   name: 'submit_backlog_picks',
   description: 'Submit the top picks from the user\'s owned-but-unplayed Steam library.',
   input_schema: {
@@ -391,30 +360,16 @@ export async function scoreBacklog(
     candidateLines,
   ].join('\n');
 
-  let message: Anthropic.Message;
+  let result: BacklogToolResult;
   try {
-    message = await getClient().messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      tools: [BACKLOG_TOOL],
-      tool_choice: { type: 'tool', name: BACKLOG_TOOL.name },
-      messages: [{ role: 'user', content: prompt }],
-    });
+    result = await askStructured<BacklogToolResult>(prompt, BACKLOG_TOOL.input_schema, MAX_TOKENS);
   } catch (err) {
-    if (err instanceof Anthropic.APIError) {
-      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    if (err instanceof BrokerError) {
+      throw new ClaudeApiError(err.message, err.status);
     }
-    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+    throw new ClaudeApiError(`Unexpected error asking Claude: ${(err as Error).message}`, 502);
   }
 
-  const toolUse = message.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-  );
-  if (!toolUse) {
-    throw new ClaudeApiError('Claude did not return backlog picks.', 502);
-  }
-
-  const result = toolUse.input as BacklogToolResult;
   if (!result || !Array.isArray(result.picks)) {
     throw new ClaudeApiError('Claude returned a malformed backlog payload.', 502);
   }
@@ -455,7 +410,7 @@ export interface DiscoverPick {
   reasoning: string;
 }
 
-const DISCOVER_TOOL: Anthropic.Tool = {
+const DISCOVER_TOOL: ToolDef = {
   name: 'submit_discoveries',
   description: 'Submit games the user should discover and acquire.',
   input_schema: {
@@ -523,28 +478,17 @@ export async function discoverRecommendations(
     'Sort picks by confidence score descending. Call submit_discoveries exactly once.',
   ].filter(Boolean).join('\n');
 
-  let message: Anthropic.Message;
+  let result: { picks: DiscoverPick[] };
   try {
-    message = await getClient().messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      tools: [DISCOVER_TOOL],
-      tool_choice: { type: 'tool', name: DISCOVER_TOOL.name },
-      messages: [{ role: 'user', content: prompt }],
-    });
+    result = await askStructured<{ picks: DiscoverPick[] }>(
+      prompt, DISCOVER_TOOL.input_schema, MAX_TOKENS);
   } catch (err) {
-    if (err instanceof Anthropic.APIError) {
-      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    if (err instanceof BrokerError) {
+      throw new ClaudeApiError(err.message, err.status);
     }
-    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+    throw new ClaudeApiError(`Unexpected error asking Claude: ${(err as Error).message}`, 502);
   }
 
-  const toolUse = message.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-  );
-  if (!toolUse) throw new ClaudeApiError('Claude did not return discoveries.', 502);
-
-  const result = toolUse.input as { picks: DiscoverPick[] };
   if (!result || !Array.isArray(result.picks)) {
     throw new ClaudeApiError('Claude returned a malformed discoveries payload.', 502);
   }
@@ -564,7 +508,7 @@ export interface LookupResult {
   reasoning: string;
 }
 
-const LOOKUP_TOOL: Anthropic.Tool = {
+const LOOKUP_TOOL: ToolDef = {
   name: 'submit_lookup',
   description: 'Submit scored game results for the lookup query.',
   input_schema: {
@@ -611,28 +555,16 @@ export async function lookupGame(
     'Call submit_lookup exactly once.',
   ].join('\n');
 
-  let message: Anthropic.Message;
+  let result: { results: LookupResult[] };
   try {
-    message = await getClient().messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      tools: [LOOKUP_TOOL],
-      tool_choice: { type: 'tool', name: LOOKUP_TOOL.name },
-      messages: [{ role: 'user', content: prompt }],
-    });
+    result = await askStructured<{ results: LookupResult[] }>(prompt, LOOKUP_TOOL.input_schema, MAX_TOKENS);
   } catch (err) {
-    if (err instanceof Anthropic.APIError) {
-      throw new ClaudeApiError(`Claude API error: ${err.message}`, err.status ?? 502);
+    if (err instanceof BrokerError) {
+      throw new ClaudeApiError(err.message, err.status);
     }
-    throw new ClaudeApiError(`Unexpected Claude error: ${(err as Error).message}`, 502);
+    throw new ClaudeApiError(`Unexpected error asking Claude: ${(err as Error).message}`, 502);
   }
 
-  const toolUse = message.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-  );
-  if (!toolUse) throw new ClaudeApiError('Claude did not return lookup results.', 502);
-
-  const result = toolUse.input as { results: LookupResult[] };
   if (!result || !Array.isArray(result.results)) {
     throw new ClaudeApiError('Claude returned a malformed lookup payload.', 502);
   }
