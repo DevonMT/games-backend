@@ -27,19 +27,22 @@ import { learnRoutes } from './routes/learn.js';
 /**
  * Two apps, one process.
  *
- * Games and Learn are separate rows in the platform with separate grants, so
- * somebody can hold Learn and not Games. They still share this container,
+ * Backlog and Stacks are separate rows in the platform with separate grants,
+ * so somebody can hold Stacks and not Backlog. They still share this container,
  * which means the grant is only real if the process refuses paths belonging to
- * the app the request is NOT for — otherwise a Learn-only person reaches
- * learn.devondoes.dev/releases and reads the games data anyway.
+ * the app the request is NOT for — otherwise a Stacks-only person reaches
+ * stacks.devondoes.dev/releases and reads the games data anyway.
+ *
+ * The keys are platform slugs; the values are URL paths. They match today and
+ * need not: a rename changes what the app is called, not where its API lives.
  *
  * Paths are listed per owner rather than inferred, because getting this wrong
  * fails open. Anything not claimed here — /health, /_astro, favicons — is
  * shared and served to both.
  */
 const OWNED: Record<string, string[]> = {
-  games: ['/steam', '/releases', '/recommendations', '/preferences', '/games'],
-  learn: ['/learn'],
+  backlog: ['/steam', '/releases', '/recommendations', '/preferences', '/backlog'],
+  stacks: ['/learn', '/stacks'],
 };
 
 /**
