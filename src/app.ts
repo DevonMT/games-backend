@@ -114,8 +114,29 @@ export function createApp(): Hono {
   app.use('/releases/*', requireIdentity);
   app.route('/releases', releasesRoutes);
 
+  /*
+   * Scoring is the FULL tier only.
+   *
+   * Not a nicety: the broker refuses the Claude Max path for an app reachable
+   * by anyone outside the admin group, so a Backlog grant at a tier that can
+   * spend moves Devon's own scoring onto a metered key. The platform declares
+   * `ai: false` on lite, which is what keeps that from firing — and this is the
+   * half that makes the declaration true. A tier the app ignores is worse than
+   * no tier at all, because the billing decision was made on the promise.
+   *
+   * X-Platform-Variant is set unconditionally by the gateway, like the identity
+   * header, so it cannot be raised by the client. Absent means no tiers are
+   * declared for this app, which is not the same as being on the lowest one.
+   */
   app.use('/recommendations', requireIdentity);
   app.use('/recommendations/*', requireIdentity);
+  app.use('/recommendations', async (c, next) => {
+    const tier = c.req.header('x-platform-variant');
+    if (tier && tier.toLowerCase() !== 'full') {
+      return c.json({ error: 'Scoring is part of the full version of Backlog.' }, 403);
+    }
+    await next();
+  });
   app.route('/recommendations', recommendationsRoutes);
 
   app.use('/preferences', requireIdentity);
