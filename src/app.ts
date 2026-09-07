@@ -24,10 +24,68 @@ import { recommendationsRoutes } from './routes/recommendations.js';
 import { preferencesRoutes } from './routes/preferences.js';
 import { learnRoutes } from './routes/learn.js';
 
+/**
+ * Two apps, one process.
+ *
+ * Games and Learn are separate rows in the platform with separate grants, so
+ * somebody can hold Learn and not Games. They still share this container,
+ * which means the grant is only real if the process refuses paths belonging to
+ * the app the request is NOT for — otherwise a Learn-only person reaches
+ * learn.devondoes.dev/releases and reads the games data anyway.
+ *
+ * Paths are listed per owner rather than inferred, because getting this wrong
+ * fails open. Anything not claimed here — /health, /_astro, favicons — is
+ * shared and served to both.
+ */
+const OWNED: Record<string, string[]> = {
+  games: ['/steam', '/releases', '/recommendations', '/preferences', '/games'],
+  learn: ['/learn'],
+};
+
+/**
+ * Which app this request is for.
+ *
+ * X-Platform-App is set unconditionally by the gateway from its own server
+ * block, so a client cannot choose it. Host is the fallback and is nearly as
+ * good — nginx picked the block by it — but only the header survives a block
+ * that ever serves more than one name.
+ *
+ * Neither present means nobody is in front of us: local development, or a
+ * direct hit on the container. Returns null, and the guard lets everything
+ * through, because refusing here would make `npm run dev` unable to open half
+ * the app while adding nothing — in production the gateway is the only route
+ * in, and it always sets the header.
+ */
+function appFor(c: { req: { header: (k: string) => string | undefined } }): string | null {
+  const explicit = c.req.header('x-platform-app');
+  if (explicit && explicit in OWNED) return explicit;
+  const host = (c.req.header('host') ?? '').split(':')[0] ?? '';
+  for (const slug of Object.keys(OWNED)) {
+    if (host.startsWith(`${slug}.`)) return slug;
+  }
+  return null;
+}
+
 export function createApp(): Hono {
   const app = new Hono();
 
   app.use('*', logger());
+
+  // Before anything else, including the static files registered by the server
+  // entry point: a page belonging to the other app is as much a leak as its API.
+  app.use('*', async (c, next) => {
+    const mine = appFor(c);
+    if (mine) {
+      const path = new URL(c.req.url).pathname;
+      const theirs = Object.entries(OWNED)
+        .filter(([slug]) => slug !== mine)
+        .flatMap(([, paths]) => paths);
+      if (theirs.some((p) => path === p || path.startsWith(`${p}/`))) {
+        return c.json({ error: 'Not found.' }, 404);
+      }
+    }
+    await next();
+  });
 
   const origins = allowedOrigins();
   app.use(
