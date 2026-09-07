@@ -250,8 +250,12 @@ const STEAM_APP_URL_RE = /store\.steampowered\.com\/app\/(\d+)/;
 function extractSteamAppId(game: RawRawgGame): number | null {
   const steamStore = (game.stores ?? []).find((s) => s.store?.slug === 'steam');
   if (!steamStore?.url) return null;
-  const m = steamStore.url.match(STEAM_APP_URL_RE);
-  return m ? parseInt(m[1], 10) : null;
+  // Narrowed through a binding rather than asserted: the capture group is not
+  // optional, so a match always has it, but noUncheckedIndexedAccess types any
+  // index as possibly-undefined and it is cheaper to satisfy that honestly
+  // than to tell the compiler it is wrong.
+  const id = steamStore.url.match(STEAM_APP_URL_RE)?.[1];
+  return id ? parseInt(id, 10) : null;
 }
 
 /**
