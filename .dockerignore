@@ -1,0 +1,12 @@
+node_modules
+.git
+.gitignore
+data
+.env
+.env.example
+.vercel
+vercel.json
+railway.toml
+scripts
+*.log
+README.md

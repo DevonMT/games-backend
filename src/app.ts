@@ -17,7 +17,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { allowedOrigins } from './lib/env.js';
-import { requireIdentity } from './middleware/auth.js';
+import { isLearnSyncRead, requireIdentity } from './middleware/auth.js';
 import { steamRoutes } from './routes/steam.js';
 import { releasesRoutes } from './routes/releases.js';
 import { recommendationsRoutes } from './routes/recommendations.js';
@@ -143,7 +143,9 @@ export function createApp(): Hono {
   app.use('/preferences/*', requireIdentity);
   app.route('/preferences', preferencesRoutes);
 
-  app.use('/learn/*', requireIdentity);
+  // Everyone else signs in; Dagster's sync reads sessions with its own scoped
+  // token (isLearnSyncRead says exactly what that token can do).
+  app.use('/learn/*', (c, next) => (isLearnSyncRead(c) ? next() : requireIdentity(c, next)));
   app.route('/learn', learnRoutes);
 
   app.notFound((c) => c.json({ error: 'Not found.' }, 404));

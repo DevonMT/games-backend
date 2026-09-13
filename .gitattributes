@@ -1,0 +1,6 @@
+# Deployed to Linux (the mini). Pin LF so a Windows checkout cannot ship CRLF.
+*.sh               text eol=lf
+*.yml              text eol=lf
+Dockerfile         text eol=lf
+.dockerignore      text eol=lf
+.env.example       text eol=lf

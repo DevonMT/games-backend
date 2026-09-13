@@ -56,6 +56,26 @@ function platformEmail(c: Context): string | null {
   return email ? email : null;
 }
 
+/**
+ * The one caller that is not a person: Dagster's Learn sync.
+ *
+ * A scoped, read-only token, accepted for `GET /learn/sessions` and nothing
+ * else. Not the gateway token, which lets whoever holds it be anyone on any
+ * route, and not a person's identity, because the sync reads on nobody's
+ * behalf. Dagster reaches this container over `link_dagster_games`, a network
+ * only the two of them share (devondoes/SPEC-network.md). To be replaced by
+ * platform-issued service credentials once the platform issues them
+ * (PLATFORM-SPEC §3).
+ */
+export function isLearnSyncRead(c: Context): boolean {
+  const expected = optionalEnv('LEARN_READ_TOKEN');
+  if (!expected || c.req.method !== 'GET') return false;
+  if (new URL(c.req.url).pathname !== '/learn/sessions') return false;
+  const bearer = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '');
+  const provided = bearer?.[1];
+  return provided !== undefined && safeEqual(provided, expected);
+}
+
 /** Rejects anything that cannot say who it is. */
 export async function requireIdentity(c: Context, next: Next): Promise<Response | void> {
   // The gateway first: it is the door this service is actually behind.

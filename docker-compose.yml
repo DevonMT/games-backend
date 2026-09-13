@@ -14,17 +14,31 @@ services:
     environment:
       NODE_ENV: production
       STATIC_DIR: /app/public
+      BROKER_URL: http://172.30.0.1:8610
     volumes:
       - games_data:/app/data
       # built /games + /learn pages, served SAME-ORIGIN so the Access cookie
       # covers the API calls they make (a cross-origin page cannot use Access)
       - /home/devon/apps/games-frontend:/app/public:ro
+    # Least privilege, per devondoes/SPEC-network.md: each network carries one
+    # relationship, and nothing else can reach this container or be reached from it.
+    # The networks are created by devondoes/ops/networks.sh.
     networks:
-      - dataplatform_default  # share the data-platform network to reach `postgres`
+      front_games: {}          # the gateway: Backlog and Stacks
+      db_games: {}             # Postgres, as `postgres`
+      link_dagster_games: {}   # Dagster's Learn sync reads /learn/sessions
+      host_services:           # the AI broker on the host, and out to RAWG and Steam
+        ipv4_address: 172.30.0.13
     depends_on: []
 
 networks:
-  dataplatform_default:
+  front_games:
+    external: true
+  db_games:
+    external: true
+  link_dagster_games:
+    external: true
+  host_services:
     external: true
 
 volumes:

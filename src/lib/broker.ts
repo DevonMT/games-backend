@@ -18,7 +18,7 @@
 
 import { optionalEnv } from './env.js';
 
-const BROKER_URL = optionalEnv('BROKER_URL') ?? 'http://172.18.0.1:8610';
+const BROKER_URL = optionalEnv('BROKER_URL') ?? 'http://172.30.0.1:8610';
 const APP_ID = optionalEnv('BROKER_APP_ID') ?? 'games';
 
 /**
