@@ -38,7 +38,7 @@ ssh "$HOST" "cd '$DIR' && sudo docker compose up -d --build 2>&1 | tail -3"
 echo "==> verify through the gateway's network"
 ssh "$HOST" '
   for i in $(seq 1 30); do
-    code=$(sudo docker exec gateway curl -s -o /dev/null -w "%{http_code}" http://games-backend:8787/health)
+    code=$(sudo docker exec gateway curl -s -m 5 -o /dev/null -w "%{http_code}" http://games-backend:8787/health)
     [ "$code" = 200 ] && break
     sleep 2
   done

@@ -27,7 +27,7 @@ services:
       front_games: {}          # the gateway: Backlog and Stacks
       db_games: {}             # Postgres, as `postgres`
       link_dagster_games: {}   # Dagster's Learn sync reads /learn/sessions
-      host_services:           # the AI broker on the host, and out to RAWG and Steam
+      host_broker:             # the AI broker on the host, and out to RAWG and Steam
         ipv4_address: 172.30.0.13
     depends_on: []
 
@@ -38,7 +38,7 @@ networks:
     external: true
   link_dagster_games:
     external: true
-  host_services:
+  host_broker:
     external: true
 
 volumes:
