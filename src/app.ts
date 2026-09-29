@@ -13,11 +13,11 @@
  *   POST /recommendations        -> Claude "will I enjoy this?" scores (auth)
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { allowedOrigins } from './lib/env.js';
-import { isLearnSyncRead, requireIdentity } from './middleware/auth.js';
+import { isLearnSyncRead, platformEmail, requireIdentity } from './middleware/auth.js';
 import { steamRoutes } from './routes/steam.js';
 import { releasesRoutes } from './routes/releases.js';
 import { recommendationsRoutes } from './routes/recommendations.js';
@@ -106,8 +106,29 @@ export function createApp(): Hono {
     c.json({ status: 'ok', service: 'games-backend', time: new Date().toISOString() }),
   );
 
+  /*
+   * The Full tier, required for every route that reaches a model. Backlog
+   * declares variants, so the gateway always sends X-Platform-Variant, and a
+   * BLANK one is a grant with no tier recorded — the least capable, not "no
+   * tiers here". It used to be let through (`if (tier && ...)`), which with
+   * the broker's Max check reading such a grant as AI-capable would have put a
+   * Lite user on Devon's subscription. Rule: nobody but Devon reaches a model
+   * unless AI is deliberately turned on for them, which here is granting Full.
+   */
+  const requireFull = async (c: Context, next: Next) => {
+    // Only the gateway's word counts: on the Access fallback nothing
+    // overwrites X-Platform-Variant, so the client could set it itself.
+    const tier = platformEmail(c) ? (c.req.header('x-platform-variant') ?? '').trim().toLowerCase() : '';
+    if (tier !== 'full') {
+      return c.json({ error: 'Scoring is part of the full version of Backlog.' }, 403);
+    }
+    await next();
+  };
+
   // Everything below the health check requires the shared secret.
   app.use('/steam/*', requireIdentity);
+  // Backlog picks are a model call like scoring; same tier rule (below).
+  app.use('/steam/backlog-picks', requireFull);
   app.route('/steam', steamRoutes);
 
   app.use('/releases', requireIdentity);
@@ -130,13 +151,11 @@ export function createApp(): Hono {
    */
   app.use('/recommendations', requireIdentity);
   app.use('/recommendations/*', requireIdentity);
-  app.use('/recommendations', async (c, next) => {
-    const tier = c.req.header('x-platform-variant');
-    if (tier && tier.toLowerCase() !== 'full') {
-      return c.json({ error: 'Scoring is part of the full version of Backlog.' }, 403);
-    }
-    await next();
-  });
+  // Every recommendations route is a model call (scoring, Discover, lookup),
+  // so the gate covers the subpaths too — it used to sit on the exact path
+  // only, and /discover and /lookup walked past it.
+  app.use('/recommendations', requireFull);
+  app.use('/recommendations/*', requireFull);
   app.route('/recommendations', recommendationsRoutes);
 
   app.use('/preferences', requireIdentity);

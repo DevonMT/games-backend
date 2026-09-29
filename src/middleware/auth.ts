@@ -47,7 +47,7 @@ function safeEqual(a: string, b: string): boolean {
  * the gateway. Without it, trusting the identity header would mean trusting
  * every container on the network to be honest about who it is.
  */
-function platformEmail(c: Context): string | null {
+export function platformEmail(c: Context): string | null {
   const expected = optionalEnv('GATEWAY_TOKEN');
   if (!expected) return null;
   const provided = c.req.header('x-gateway-token');
