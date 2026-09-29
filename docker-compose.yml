@@ -15,6 +15,10 @@ services:
       NODE_ENV: production
       STATIC_DIR: /app/public
       BROKER_URL: http://172.30.0.1:8610
+      # The broker's policy id. Unset, the code sent "games", which the broker
+      # has never known: every AI call was refused as unknown_app from the
+      # Backlog/Stacks split (2026-09-05) until this line.
+      BROKER_APP_ID: backlog
     volumes:
       - games_data:/app/data
       # built /games + /learn pages, served SAME-ORIGIN so the Access cookie
