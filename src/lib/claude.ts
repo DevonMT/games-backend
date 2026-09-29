@@ -422,7 +422,7 @@ const DISCOVER_TOOL: ToolDef = {
         items: {
           type: 'object',
           properties: {
-            name:            { type: 'string',  description: 'Exact game title.' },
+            name:            { type: 'string',  description: 'The exact store title and nothing else: no commentary, comparisons or taglines.' },
             platforms:       { type: 'array',   items: { type: 'string' }, description: 'Platforms this game is available on.' },
             description:     { type: 'string',  description: '2-3 sentence overview of the game.' },
             confidenceScore: { type: 'integer', description: '0-100 likelihood the user will enjoy it.' },
@@ -519,7 +519,11 @@ export async function discoverRecommendations(
     throw new ClaudeApiError('Claude returned a malformed discoveries payload.', 502);
   }
 
-  return dropOwned(result.picks, library.games.map((g) => g.name))
+  const kept = dropOwned(result.picks, library.games.map((g) => g.name));
+  // One line per request, so "asked for 8, got 3" can be told apart: the
+  // model returning few, or the owned filter removing most of them.
+  console.log(`discover: asked ${limit + 4}, got ${result.picks.length}, ${result.picks.length - kept.length} already owned`);
+  return kept
     .map((p) => ({ ...p, confidenceScore: clampScore(p.confidenceScore) }))
     .sort((a, b) => b.confidenceScore - a.confidenceScore)
     .slice(0, limit);
