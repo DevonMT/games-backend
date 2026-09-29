@@ -436,6 +436,31 @@ const DISCOVER_TOOL: ToolDef = {
   },
 };
 
+/**
+ * A title reduced to what identifies the game: case, accents, trademark signs,
+ * punctuation, articles and a trailing edition all go. "The Witcher 3: Wild
+ * Hunt – Game of the Year Edition" and "Witcher 3 Wild Hunt" come out equal;
+ * "Hades" and "Hades II" do not, which is why this is equality and never a
+ * prefix match.
+ */
+export function titleKey(s: string): string {
+  return s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '')
+    .replace(/[™®©]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+(goty|game of the year|definitive|complete|remastered|enhanced|deluxe|ultimate|anniversary|directors cut|final cut)( edition)?\s*$/, '')
+    .replace(/\s+edition\s*$/, '')
+    .replace(/\b(the|a|an)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/** Picks the user already owns, removed — checked in code against the WHOLE
+ *  library, because the prompt can only carry the most-played 60 and the
+ *  unplayed rest is exactly the backlog Discover kept suggesting buying. */
+export function dropOwned<T extends { name: string }>(picks: T[], owned: string[]): T[] {
+  const have = new Set(owned.map(titleKey));
+  return picks.filter((p) => !have.has(titleKey(p.name)));
+}
+
 export async function discoverRecommendations(
   opts: { platforms?: string[]; genres?: string[]; limit?: number },
   prefs?: UserPreferences,
@@ -470,7 +495,8 @@ export async function discoverRecommendations(
     '',
     ownedBlock,
     '',
-    `Recommend exactly ${limit} games this user would love that they likely do not own yet.`,
+    // A few spare, because owned ones are removed after (dropOwned).
+    `Recommend exactly ${limit + 4} games this user would love that they likely do not own yet.`,
     'Draw from your full knowledge — any era, any release, not just recent titles.',
     'For each game provide: its exact title, the platforms it is available on,',
     'a 2-3 sentence description, a 0-100 confidence score for this specific user,',
@@ -493,9 +519,10 @@ export async function discoverRecommendations(
     throw new ClaudeApiError('Claude returned a malformed discoveries payload.', 502);
   }
 
-  return result.picks
+  return dropOwned(result.picks, library.games.map((g) => g.name))
     .map((p) => ({ ...p, confidenceScore: clampScore(p.confidenceScore) }))
-    .sort((a, b) => b.confidenceScore - a.confidenceScore);
+    .sort((a, b) => b.confidenceScore - a.confidenceScore)
+    .slice(0, limit);
 }
 
 // ── Lookup ────────────────────────────────────────────────────────────────────

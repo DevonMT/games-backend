@@ -35,8 +35,20 @@ learnRoutes.post('/sessions', async (c) => {
     return c.json({ error: 'minutes must be an integer between 1 and 600.' }, 400);
   }
 
+  // A day other than today is now a normal thing to send (Stacks' "Yesterday").
+  // It must be a real instant, not in the future (a little clock skew aside),
+  // and within a year -- an unchecked string went straight into the table.
+  let when = new Date().toISOString();
+  if (loggedAt !== undefined && loggedAt !== null) {
+    const t = typeof loggedAt === 'string' ? Date.parse(loggedAt) : NaN;
+    if (Number.isNaN(t)) return c.json({ error: 'loggedAt must be a date.' }, 400);
+    if (t > Date.now() + 5 * 60_000) return c.json({ error: 'loggedAt cannot be in the future.' }, 400);
+    if (t < Date.now() - 366 * 86_400_000) return c.json({ error: 'loggedAt is more than a year ago.' }, 400);
+    when = new Date(t).toISOString();
+  }
+
   const id = await insertLearnSession({
-    loggedAt: typeof loggedAt === 'string' ? loggedAt : new Date().toISOString(),
+    loggedAt: when,
     source: source as Source,
     item: item.trim(),
     skills: safeSkills,
