@@ -480,7 +480,10 @@ export async function discoverRecommendations(
     ? `Genre preference: ${opts.genres!.join(', ')}`
     : '';
 
-  const ownedNames = library.games.slice(0, 60).map((g) => g.name).join(', ');
+  // The WHOLE library, not the top 60 by playtime: the unplayed tail is exactly
+  // what Discover kept suggesting (4-5 of every 7 picks were already owned,
+  // 2026-09-28). 632 titles is ~13k characters, cheap next to wasted picks.
+  const ownedNames = library.games.map((g) => g.name).join(', ');
   const ownedBlock = ownedNames
     ? `The user already owns these Steam games — do NOT recommend them:\n${ownedNames}`
     : '';
